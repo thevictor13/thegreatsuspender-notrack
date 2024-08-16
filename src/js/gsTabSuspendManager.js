@@ -545,7 +545,7 @@ var gsTabSuspendManager = (function() {
   ) {
     const MAX_CANVAS_HEIGHT = forceScreenCapture ? 10000 : 5000;
     const IMAGE_TYPE = 'image/webp';
-    const IMAGE_QUALITY = forceScreenCapture ? 0.92 : 0.5;
+    const IMAGE_QUALITY = forceScreenCapture ? 1 : 0.5;
 
     let height = 0;
     let width = 0;

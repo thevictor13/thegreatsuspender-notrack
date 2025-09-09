@@ -316,17 +316,21 @@ var gsSession = (function() {
       await recoverLostTabs();
       updated = true;
 
-      //update updated views
-      const updatedViews = tgs.getInternalViewsByViewName('updated');
-      if (updatedViews.length > 0) {
-        for (const view of updatedViews) {
-          view.exports.toggleUpdated();
+      //update updated views using message passing
+      chrome.tabs.query({url: chrome.runtime.getURL('updated.html')}, (tabs) => {
+        if (tabs.length > 0) {
+          for (const tab of tabs) {
+            chrome.tabs.sendMessage(tab.id, {
+              action: 'toggleUpdated'
+            });
+          }
+        } else {
+          await gsUtils.removeTabsByUrlAsPromised(updatedUrl);
+          if (!noNag) {
+            await gsChrome.tabsCreate({ url: updatedUrl });
+          }
         }
-      } else {
-        await gsUtils.removeTabsByUrlAsPromised(updatedUrl);
-        if (!noNag) {
-          await gsChrome.tabsCreate({ url: updatedUrl });
-        }  
+      });  
       }
     } else {
       updated = true;
@@ -749,10 +753,15 @@ var gsSession = (function() {
       active: false,
     });
 
-    // Update recovery view (if it exists)
-    for (const view of tgs.getInternalViewsByViewName('recovery')) {
-      view.exports.removeTabFromList(newTab);
-    }
+    // Update recovery view (if it exists) using message passing
+    chrome.tabs.query({url: chrome.runtime.getURL('recovery.html')}, (tabs) => {
+      for (const tab of tabs) {
+        chrome.tabs.sendMessage(tab.id, {
+          action: 'removeTabFromList',
+          tab: newTab
+        });
+      }
+    });
   }
 
   async function updateSessionMetrics(reset) {

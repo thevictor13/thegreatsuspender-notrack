@@ -249,9 +249,16 @@ var gsTabCheckManager = (function() {
       }
     }
 
-    // Make sure tab is registered as a 'view' of the extension
-    const suspendedView = tgs.getInternalViewByTabId(tab.id);
-    if (!suspendedView) {
+    // In MV3, we can't check views directly - check if tab is responsive via messaging
+    let isTabResponsive = false;
+    try {
+      await chrome.tabs.sendMessage(tab.id, {action: 'ping'});
+      isTabResponsive = true;
+    } catch (error) {
+      // Tab is not responsive
+    }
+    
+    if (!isTabResponsive) {
       gsUtils.log(
         tab.id,
         QUEUE_ID,
@@ -340,14 +347,12 @@ var gsTabCheckManager = (function() {
 
   async function resuspendSuspendedTab(tab) {
     gsUtils.log(tab.id, QUEUE_ID, 'Resuspending unresponsive suspended tab.');
-    const suspendedView = tgs.getInternalViewByTabId(tab.id);
-    if (suspendedView) {
-      tgs.setTabStatePropForTabId(
-        tab.id,
-        tgs.STATE_DISABLE_UNSUSPEND_ON_RELOAD,
-        true
-      );
-    }
+    // In MV3, always set the state property since we can't check views
+    tgs.setTabStatePropForTabId(
+      tab.id,
+      tgs.STATE_DISABLE_UNSUSPEND_ON_RELOAD,
+      true
+    );
     const reloadOk = await gsChrome.tabsReload(tab.id);
     return reloadOk;
   }

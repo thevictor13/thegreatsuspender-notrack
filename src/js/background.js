@@ -898,11 +898,11 @@ var tgs = (function() {
       return;
     }
 
-    const tabView = tgs.getInternalViewByTabId(tab.id);
+    // In MV3, use message passing instead of direct view access
     const quickInit =
       gsStorage.getOption(gsStorage.DISCARD_AFTER_SUSPEND) && !tab.active;
     gsSuspendedTab
-      .initTab(tab, tabView, { quickInit })
+      .initTab(tab, null, { quickInit })
       .catch(error => {
         gsUtils.warning(tab.id, error);
       })
@@ -1030,10 +1030,15 @@ var tgs = (function() {
       const oldHotkey = _suspensionToggleHotkey;
       _suspensionToggleHotkey = await buildSuspensionToggleHotkey();
       if (oldHotkey !== _suspensionToggleHotkey) {
-        const suspendedViews = getInternalViewsByViewName('suspended');
-        for (const suspendedView of suspendedViews) {
-          gsSuspendedTab.updateCommand(suspendedView, _suspensionToggleHotkey);
-        }
+        // Use message passing to update commands in all suspended tabs
+        chrome.tabs.query({url: chrome.runtime.getURL('suspended.html*')}, (tabs) => {
+          for (const tab of tabs) {
+            chrome.tabs.sendMessage(tab.id, {
+              action: 'updateCommand',
+              suspensionToggleHotkey: _suspensionToggleHotkey
+            });
+          }
+        });
       }
       _triggerHotkeyUpdate = false;
     }
@@ -1157,10 +1162,10 @@ var tgs = (function() {
         }
       }
     } else if (focusedTab.url === chrome.runtime.getURL('options.html')) {
-      const optionsView = getInternalViewByTabId(focusedTab.id);
-      if (optionsView && optionsView.exports) {
-        optionsView.exports.initSettings();
-      }
+      // Use message passing to initialize options page
+      chrome.tabs.sendMessage(focusedTab.id, {
+        action: 'initSettings'
+      });
     }
 
     //Reset timer on tab that lost focus.
@@ -1194,10 +1199,10 @@ var tgs = (function() {
       if (navigator.onLine) {
         unsuspendTab(focusedTab);
       } else {
-        const suspendedView = getInternalViewByTabId(focusedTab.id);
-        if (suspendedView) {
-          gsSuspendedTab.showNoConnectivityMessage(suspendedView);
-        }
+        // Use message passing to show no connectivity message
+        chrome.tabs.sendMessage(focusedTab.id, {
+          action: 'showNoConnectivityMessage'
+        });
       }
     }
   }

@@ -4,14 +4,21 @@ var gsSuspendedTab = (function() {
   'use strict';
 
   async function initTab(tab, tabView, { quickInit }) {
-    if (!tabView) {
-      gsUtils.warning(
-        tab.id,
-        'Could not get internalTabView for suspended tab'
-      );
-    }
     const suspendedUrl = tab.url;
 
+    if (!tabView) {
+      // In MV3 service worker, use message passing instead of direct DOM access
+      const sessionId = gsSession.getSessionId();
+      chrome.tabs.sendMessage(tab.id, {
+        action: 'initSuspendedTab',
+        sessionId: sessionId,
+        suspendedUrl: suspendedUrl,
+        quickInit: quickInit
+      });
+      return;
+    }
+
+    // Legacy direct DOM access (for backward compatibility if tabView exists)
     // Set sessionId for subsequent checks
     tabView.document.sessionId = gsSession.getSessionId();
 

@@ -639,30 +639,24 @@ var gsUtils = {
             gsStorage.SCREEN_CAPTURE
           );
           if (updateTheme || updatePreviewMode) {
-            const suspendedView = tgs.getInternalViewByTabId(tab.id);
-            if (suspendedView) {
-              if (updateTheme) {
-                const theme = gsStorage.getOption(gsStorage.THEME);
-                gsFavicon.getFaviconMetaData(tab).then(faviconMeta => {
-                  const isLowContrastFavicon = faviconMeta.isDark || false;
-                  gsSuspendedTab.updateTheme(
-                    suspendedView,
-                    tab,
-                    theme,
-                    isLowContrastFavicon
-                  );
+            // Use message passing to update suspended tabs
+            if (updateTheme) {
+              const theme = gsStorage.getOption(gsStorage.THEME);
+              gsFavicon.getFaviconMetaData(tab).then(faviconMeta => {
+                const isLowContrastFavicon = faviconMeta.isDark || false;
+                chrome.tabs.sendMessage(tab.id, {
+                  action: 'updateTheme',
+                  theme: theme,
+                  isLowContrastFavicon: isLowContrastFavicon
                 });
-              }
-              if (updatePreviewMode) {
-                const previewMode = gsStorage.getOption(
-                  gsStorage.SCREEN_CAPTURE
-                );
-                gsSuspendedTab.updatePreviewMode(
-                  suspendedView,
-                  tab,
-                  previewMode
-                ); // async. unhandled promise.
-              }
+              });
+            }
+            if (updatePreviewMode) {
+              const previewMode = gsStorage.getOption(gsStorage.SCREEN_CAPTURE);
+              chrome.tabs.sendMessage(tab.id, {
+                action: 'updatePreviewMode',
+                previewMode: previewMode
+              });
             }
           }
 

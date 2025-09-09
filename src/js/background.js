@@ -85,7 +85,7 @@ var tgs = (function() {
     retries = retries || 0;
     if (retries > 300) {
       // allow 30 seconds :scream:
-      chrome.tabs.create({ url: chrome.extension.getURL('broken.html') });
+      chrome.tabs.create({ url: chrome.runtime.getURL('broken.html') });
       return Promise.reject('Failed to initialise background scripts');
     }
     return new Promise(function(resolve) {
@@ -117,11 +117,10 @@ var tgs = (function() {
 
       //add context menu items
       //TODO: Report chrome bug where adding context menu in incognito removes it from main windows
-      if (!chrome.extension.inIncognitoContext) {
-        buildContextMenu(false);
-        var contextMenus = gsStorage.getOption(gsStorage.ADD_CONTEXT);
-        buildContextMenu(contextMenus);
-      }
+      // In MV3, always build context menus as incognito context detection is different
+      buildContextMenu(false);
+      var contextMenus = gsStorage.getOption(gsStorage.ADD_CONTEXT);
+      buildContextMenu(contextMenus);
 
       //initialise currentStationary and currentFocused vars
       const activeTabs = await gsChrome.tabsQuery({ active: true });
@@ -144,17 +143,14 @@ var tgs = (function() {
   }
 
   function getInternalViewByTabId(tabId) {
-    const internalViews = chrome.extension.getViews({ tabId: tabId });
-    if (internalViews.length === 1) {
-      return internalViews[0];
-    }
+    // In MV3, we can't get views by tabId directly
+    // This function returns null as extension views are handled differently in service workers
     return null;
   }
   function getInternalViewsByViewName(viewName) {
-    const internalViews = chrome.extension
-      .getViews()
-      .filter(o => o.location.pathname.indexOf(viewName) >= 0);
-    return internalViews;
+    // In MV3, extension views are handled differently
+    // Return empty array as service workers don't have direct access to extension views
+    return [];
   }
 
   function getCurrentlyActiveTab(callback) {
@@ -553,15 +549,27 @@ var tgs = (function() {
       new Date().getTime() + timeToSuspend
     );
 
-    timerDetails.timer = setTimeout(async () => {
-      const updatedTabId = timerDetails.tabId; // This may get updated via updateTabIdReferences
-      const updatedTab = await gsChrome.tabsGet(updatedTabId);
-      if (!updatedTab) {
-        gsUtils.warning(updatedTabId, 'Couldnt find tab. Aborting suspension');
-        return;
-      }
-      gsTabSuspendManager.queueTabForSuspension(updatedTab, 3);
-    }, timeToSuspend);
+    // Use chrome.alarms for long durations in service worker
+    const alarmName = `suspend_tab_${tab.id}`;
+    timerDetails.alarmName = alarmName;
+    
+    if (timeToSuspend > 30000) { // Use alarms for timeouts > 30 seconds
+      chrome.alarms.create(alarmName, { 
+        delayInMinutes: timeToSuspend / (1000 * 60) 
+      });
+      timerDetails.timer = null;
+    } else {
+      // Use setTimeout for short delays
+      timerDetails.timer = setTimeout(async () => {
+        const updatedTabId = timerDetails.tabId;
+        const updatedTab = await gsChrome.tabsGet(updatedTabId);
+        if (!updatedTab) {
+          gsUtils.warning(updatedTabId, 'Couldnt find tab. Aborting suspension');
+          return;
+        }
+        gsTabSuspendManager.queueTabForSuspension(updatedTab, 3);
+      }, timeToSuspend);
+    }
     gsUtils.log(
       tab.id,
       'Adding tab timer for: ' + timerDetails.suspendDateTime
@@ -586,7 +594,17 @@ var tgs = (function() {
       return;
     }
     gsUtils.log(tabId, 'Removing tab timer.');
-    clearTimeout(timerDetails.timer);
+    
+    // Clear timeout if it exists
+    if (timerDetails.timer) {
+      clearTimeout(timerDetails.timer);
+    }
+    
+    // Clear alarm if it exists
+    if (timerDetails.alarmName) {
+      chrome.alarms.clear(timerDetails.alarmName);
+    }
+    
     setTabStatePropForTabId(tabId, STATE_TIMER_DETAILS, null);
   }
 
@@ -912,6 +930,20 @@ var tgs = (function() {
     const timerDetails = getTabStatePropForTabId(newTabId, STATE_TIMER_DETAILS);
     if (timerDetails) {
       timerDetails.tabId = newTabId;
+      // Update alarm name if it exists
+      if (timerDetails.alarmName) {
+        const oldAlarmName = timerDetails.alarmName;
+        const newAlarmName = `suspend_tab_${newTabId}`;
+        chrome.alarms.get(oldAlarmName, (alarm) => {
+          if (alarm) {
+            chrome.alarms.clear(oldAlarmName);
+            chrome.alarms.create(newAlarmName, {
+              when: alarm.scheduledTime
+            });
+            timerDetails.alarmName = newAlarmName;
+          }
+        });
+      }
     }
   }
 
@@ -1124,7 +1156,7 @@ var tgs = (function() {
           gsTabSuspendManager.unqueueTabForSuspension(focusedTab);
         }
       }
-    } else if (focusedTab.url === chrome.extension.getURL('options.html')) {
+    } else if (focusedTab.url === chrome.runtime.getURL('options.html')) {
       const optionsView = getInternalViewByTabId(focusedTab.id);
       if (optionsView && optionsView.exports) {
         optionsView.exports.initSettings();
@@ -1173,7 +1205,7 @@ var tgs = (function() {
   function promptForFilePermissions() {
     getCurrentlyActiveTab(activeTab => {
       chrome.tabs.create({
-        url: chrome.extension.getURL('permissions.html'),
+        url: chrome.runtime.getURL('permissions.html'),
         index: activeTab.index + 1,
       });
     });
@@ -1377,7 +1409,7 @@ var tgs = (function() {
     var icon = ![gsUtils.STATUS_NORMAL, gsUtils.STATUS_ACTIVE].includes(status)
       ? ICON_SUSPENSION_PAUSED
       : ICON_SUSPENSION_ACTIVE;
-    chrome.browserAction.setIcon({ path: icon, tabId: tabId }, function() {
+    chrome.action.setIcon({ path: icon, tabId: tabId }, function() {
       if (chrome.runtime.lastError) {
         gsUtils.warning(
           tabId,
@@ -1644,6 +1676,18 @@ var tgs = (function() {
   }
 
   function addChromeListeners() {
+    // Add alarm listener for tab suspension
+    chrome.alarms.onAlarm.addListener(function(alarm) {
+      if (alarm.name.startsWith('suspend_tab_')) {
+        const tabId = parseInt(alarm.name.replace('suspend_tab_', ''));
+        gsChrome.tabsGet(tabId).then(tab => {
+          if (tab) {
+            gsTabSuspendManager.queueTabForSuspension(tab, 3);
+          }
+        });
+      }
+    });
+    
     chrome.windows.onFocusChanged.addListener(function(windowId) {
       handleWindowFocusChanged(windowId);
     });
@@ -1692,7 +1736,7 @@ var tgs = (function() {
 
       var noticeToDisplay = requestNotice();
       if (noticeToDisplay) {
-        chrome.tabs.create({ url: chrome.extension.getURL('notice.html') });
+        chrome.tabs.create({ url: chrome.runtime.getURL('notice.html') });
       }
     });
     chrome.windows.onRemoved.addListener(function(windowId) {
